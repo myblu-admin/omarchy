@@ -40,6 +40,14 @@ cat >"$mock_bin/ddcutil" <<'SH'
 printf 'ddcutil %s\n' "$*" >>"$CALL_LOG"
 
 if [[ $* == *" detect --brief"* ]]; then
+  if [[ -n ${DDC_INVALID_CONNECTOR:-} ]]; then
+    cat <<EOF
+Invalid display
+   I2C bus:             /dev/i2c-${DDC_INVALID_BUS:-9}
+   DRM connector:       card1-${DDC_INVALID_CONNECTOR}
+
+EOF
+  fi
   cat <<EOF
 Display 1
    I2C bus:             /dev/i2c-${DDC_BUS:-7}
@@ -100,6 +108,23 @@ fi
 (( $(grep -c ' detect --brief' "$call_log") == detect_count + 1 )) || \
   fail "unsupported external monitor detection is temporarily cached"
 pass "unsupported external monitor has no brightness backend"
+
+# ddcutil lists a monitor it could not talk to over DDC as "Invalid display" and
+# still prints its I2C bus. Reading VCP on that bus fails slowly (seconds of
+# EIO retries), so the bus must be ignored and the monitor cached as unavailable.
+detect_count=$(grep -c ' detect --brief' "$call_log")
+if DDC_INVALID_CONNECTOR=DP-3 DDC_INVALID_BUS=9 run_brightness --monitor DP-3 >/dev/null 2>&1; then
+  fail "invalid DDC display has no brightness backend"
+fi
+if grep -F 'ddcutil --bus 9 ' "$call_log" >/dev/null; then
+  fail "invalid DDC display is not probed on its bus"
+fi
+if DDC_INVALID_CONNECTOR=DP-3 DDC_INVALID_BUS=9 run_brightness --monitor DP-3 >/dev/null 2>&1; then
+  fail "cached invalid DDC display has no brightness backend"
+fi
+(( $(grep -c ' detect --brief' "$call_log") == detect_count + 1 )) || \
+  fail "invalid DDC display detection is temporarily cached"
+pass "invalid DDC display is ignored and cached as unavailable"
 
 rm -f "$runtime_dir/omarchy-brightness-display-ddc/DP-1.bus"
 detect_count=$(grep -c ' detect --brief' "$call_log")
